@@ -13,8 +13,27 @@ class ItemResurrectionGUI:
         self.db = Database()
         self.current_user = None
         
+        # 初始化物品类型（如果数据库中没有）
+        self.initialize_item_types()
+        
         # 创建主界面
         self.create_login_interface()
+    
+    def initialize_item_types(self):
+        """初始化物品类型"""
+        if not self.db.get_item_types():
+            print("初始化默认物品类型...")
+            # 添加一些默认的物品类型
+            default_types = [
+                ItemType("书籍", ["作者", "出版社", "ISBN"]),
+                ItemType("电子产品", ["品牌", "型号", "序列号"]),
+                ItemType("家具", ["材质", "尺寸", "颜色"]),
+                ItemType("衣物", ["尺码", "材质", "品牌"]),
+                ItemType("其他", [])
+            ]
+            for item_type in default_types:
+                self.db.add_item_type(item_type)
+            print("默认物品类型初始化完成")
     
     def create_login_interface(self):
         """创建登录界面"""
@@ -39,6 +58,25 @@ class ItemResurrectionGUI:
         
         ttk.Button(button_frame, text="登录", command=self.login).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="注册", command=self.register).pack(side=tk.LEFT, padx=5)
+        
+        # 添加管理员初始化按钮（仅用于测试）
+        if not self.db.get_user("admin"):
+            ttk.Button(button_frame, text="初始化管理员", command=self.initialize_admin).pack(side=tk.LEFT, padx=5)
+    
+    def initialize_admin(self):
+        """初始化管理员账号（仅用于测试）"""
+        admin_user = User(
+            username="admin",
+            password="admin123",
+            name="系统管理员",
+            address="系统地址",
+            phone="00000000000",
+            email="admin@example.com",
+            is_admin=True,
+            is_approved=True
+        )
+        self.db.add_user(admin_user)
+        messagebox.showinfo("成功", "管理员账号已初始化！\n用户名: admin\n密码: admin123")
     
     def create_main_interface(self):
         """创建主界面"""
@@ -50,6 +88,8 @@ class ItemResurrectionGUI:
         
         # 文件菜单
         file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="刷新", command=self.refresh_items)
+        file_menu.add_separator()
         file_menu.add_command(label="退出", command=self.root.quit)
         menubar.add_cascade(label="文件", menu=file_menu)
         
@@ -70,6 +110,7 @@ class ItemResurrectionGUI:
         toolbar = ttk.Frame(self.root)
         toolbar.pack(fill=tk.X, padx=5, pady=5)
         
+        ttk.Button(toolbar, text="刷新", command=self.refresh_items).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="添加物品", command=self.add_item).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="删除物品", command=self.delete_item).pack(side=tk.LEFT, padx=2)
         
@@ -90,9 +131,13 @@ class ItemResurrectionGUI:
         self.keyword_entry.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(search_frame, text="搜索", command=self.search_items).pack(side=tk.LEFT, padx=5)
+        ttk.Button(search_frame, text="重置", command=self.reset_search).pack(side=tk.LEFT, padx=5)
         
         # 物品列表
-        self.tree = ttk.Treeview(self.root, columns=('ID', '名称', '类型', '联系人', '地址'), show='headings')
+        list_frame = ttk.Frame(self.root)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        self.tree = ttk.Treeview(list_frame, columns=('ID', '名称', '类型', '联系人', '地址'), show='headings')
         self.tree.heading('ID', text='ID')
         self.tree.heading('名称', text='物品名称')
         self.tree.heading('类型', text='物品类型')
@@ -106,10 +151,10 @@ class ItemResurrectionGUI:
         self.tree.column('联系人', width=150)
         self.tree.column('地址', width=200)
         
-        scrollbar = ttk.Scrollbar(self.root, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # 显示所有物品
@@ -177,6 +222,16 @@ class ItemResurrectionGUI:
         """退出登录"""
         self.current_user = None
         self.create_login_interface()
+    
+    def refresh_items(self):
+        """刷新物品列表"""
+        self.load_items()
+    
+    def reset_search(self):
+        """重置搜索条件"""
+        self.type_var.set("全部")
+        self.keyword_entry.delete(0, tk.END)
+        self.load_items()
     
     def show_user_info(self):
         """显示个人信息"""
@@ -340,50 +395,72 @@ class ItemResurrectionGUI:
             return
         
         type_names = [t['name'] for t in item_types]
-        selected_type = simpledialog.askstring("选择类型", f"请选择物品类型（{', '.join(type_names)}）:")
         
-        if selected_type not in type_names:
-            messagebox.showerror("错误", "无效的物品类型！")
-            return
+        # 使用对话框选择类型
+        def on_type_select():
+            selected_type = type_var.get()
+            if selected_type and selected_type in type_names:
+                add_item_details(selected_type)
+                type_window.destroy()
+            else:
+                messagebox.showerror("错误", "请选择有效的物品类型！")
         
-        # 获取基本信息
-        name = simpledialog.askstring("物品名称", "请输入物品名称:")
-        if not name:
-            return
+        type_window = tk.Toplevel(self.root)
+        type_window.title("选择物品类型")
+        type_window.geometry("300x150")
+        type_window.transient(self.root)
+        type_window.grab_set()
         
-        description = simpledialog.askstring("物品描述", "请输入物品描述:")
-        address = simpledialog.askstring("物品地址", "请输入物品所在地址:")
-        phone = simpledialog.askstring("联系电话", "请输入联系电话:")
-        email = simpledialog.askstring("联系邮箱", "请输入联系邮箱:")
+        ttk.Label(type_window, text="请选择物品类型:").pack(pady=10)
         
-        if not all([description, address, phone, email]):
-            messagebox.showwarning("警告", "所有信息都必须填写！")
-            return
+        type_var = tk.StringVar()
+        type_combo = ttk.Combobox(type_window, textvariable=type_var, values=type_names, width=30)
+        type_combo.pack(pady=10)
+        if type_names:
+            type_combo.current(0)
         
-        # 获取额外属性
-        item_type = self.db.get_item_type(selected_type)
-        extra_attributes = {}
-        
-        for attr in item_type['attributes']:
-            value = simpledialog.askstring("额外属性", f"请输入{attr}:")
-            if value:
-                extra_attributes[attr] = value
-        
-        # 创建物品
-        item = Item(
-            name=name,
-            description=description,
-            address=address,
-            contact_phone=phone,
-            contact_email=email,
-            item_type=selected_type,
-            user=self.current_user['username'],
-            extra_attributes=extra_attributes
-        )
-        
-        self.db.add_item(item)
-        self.load_items()
-        messagebox.showinfo("成功", "物品添加成功！")
+        ttk.Button(type_window, text="确定", command=on_type_select).pack(pady=10)
+    
+        def add_item_details(selected_type):
+            """添加物品详细信息"""
+            # 获取基本信息
+            name = simpledialog.askstring("物品名称", "请输入物品名称:")
+            if not name:
+                return
+            
+            description = simpledialog.askstring("物品描述", "请输入物品描述:")
+            address = simpledialog.askstring("物品地址", "请输入物品所在地址:")
+            phone = simpledialog.askstring("联系电话", "请输入联系电话:")
+            email = simpledialog.askstring("联系邮箱", "请输入联系邮箱:")
+            
+            if not all([description, address, phone, email]):
+                messagebox.showwarning("警告", "所有信息都必须填写！")
+                return
+            
+            # 获取额外属性
+            item_type = self.db.get_item_type(selected_type)
+            extra_attributes = {}
+            
+            for attr in item_type['attributes']:
+                value = simpledialog.askstring("额外属性", f"请输入{attr}:")
+                if value:
+                    extra_attributes[attr] = value
+            
+            # 创建物品
+            item = Item(
+                name=name,
+                description=description,
+                address=address,
+                contact_phone=phone,
+                contact_email=email,
+                item_type=selected_type,
+                user=self.current_user['username'],
+                extra_attributes=extra_attributes
+            )
+            
+            self.db.add_item(item)
+            self.refresh_items()
+            messagebox.showinfo("成功", "物品添加成功！")
     
     def delete_item(self):
         """删除物品"""
@@ -392,11 +469,51 @@ class ItemResurrectionGUI:
             messagebox.showwarning("警告", "请选择要删除的物品！")
             return
         
-        if messagebox.askyesno("确认", "确定要删除选中的物品吗？"):
-            item_id = self.tree.item(selected[0])['values'][0]
-            self.db.delete_item(item_id)
-            self.load_items()
-            messagebox.showinfo("成功", "物品删除成功！")
+        # 获取选中的物品ID和名称
+        item_id = self.tree.item(selected[0])['values'][0]
+        item_name = self.tree.item(selected[0])['values'][1]
+        
+        print(f"尝试删除: ID={item_id}, 名称={item_name}")  # 调试信息
+        
+        # 确认删除
+        if not messagebox.askyesno("确认", f"确定要删除物品 '{item_name}' 吗？"):
+            return
+        
+        try:
+            # 检查物品是否存在
+            item_to_delete = self.db.get_item(item_id)
+            if not item_to_delete:
+                messagebox.showerror("错误", "物品不存在！")
+                return
+            
+            # 检查权限：只有管理员或物品所有者可以删除
+            if (not self.current_user.get('is_admin') and 
+                item_to_delete['user'] != self.current_user['username']):
+                messagebox.showerror("错误", "您只能删除自己的物品！")
+                return
+            
+            # 执行删除操作
+            print(f"正在删除物品 ID: {item_id}")
+            print(f"当前用户: {self.current_user['username']}")
+            print(f"物品所有者: {item_to_delete['user']}")
+            print(f"用户是管理员: {self.current_user.get('is_admin', False)}")
+            
+            # 从数据库中删除
+            success = self.db.delete_item(item_id)
+            print(f"数据库删除结果: {success}")
+            
+            if success:
+                # 从Treeview中删除选中项
+                for item in selected:
+                    self.tree.delete(item)
+                messagebox.showinfo("成功", "物品删除成功！")
+            else:
+                messagebox.showerror("错误", "删除失败！")
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"删除失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def search_items(self):
         """搜索物品"""
@@ -410,12 +527,16 @@ class ItemResurrectionGUI:
     
     def load_items(self, item_type=None, keyword=None):
         """加载物品列表"""
+        if not hasattr(self, 'tree'):
+            return
+            
         # 清空现有数据
         for item in self.tree.get_children():
             self.tree.delete(item)
         
         # 获取物品数据
         items = self.db.get_items(item_type, keyword)
+        print(f"加载了 {len(items)} 个物品")
         
         # 添加到表格
         for item in items:
@@ -426,3 +547,4 @@ class ItemResurrectionGUI:
                 item['contact_phone'],
                 item['address']
             ))
+

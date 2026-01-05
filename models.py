@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+import random
 
 class User:
     """用户类"""
@@ -43,7 +44,14 @@ class Item:
     """物品类"""
     def __init__(self, name, description, address, contact_phone, contact_email, 
                  item_type, user, extra_attributes=None, id=None):
-        self.id = id or datetime.now().strftime('%Y%m%d%H%M%S')
+        # 生成更简单的ID：时间戳+随机数
+        if id is None:
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+            random_num = random.randint(100, 999)
+            self.id = f"{timestamp}{random_num}"
+        else:
+            self.id = id
+            
         self.name = name
         self.description = description
         self.address = address
